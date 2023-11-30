@@ -1,0 +1,166 @@
+---
+title: "cell_marker_v1"
+output: html_document
+date: "2023-11-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r Skin epidermal cell}
+#cell specific markers #
+#5. cell type 별 marker gene list
+#Human eyelid marker list (https://www.sciencedirect.com/science/article/pii/S1534580720308777#app2)
+
+##Keratinocyte ####
+Keratinocyte_basal <- c("KRT15", "KRT14", "KRT5", "COLA1", "IGFBP3", "DST", "S100A2", "MIR205HG")
+Keratinocyte_Spinous <- c("KRT1", "KRT10", "KRTDAP", "DMKN", "LY3", "DEFB1", "LY6D", "RHOV", "LGALS7")
+Keratinocyte_Granular <- c("CALML5", "SLURP1", "SPRR1B", "KRT2", "FLG", "SBSN", "CSTA", 
+                           "FABP5", "KRTDAP", "SULT2B1")
+
+Keratinocyte_undiff = c("KRT5", "KRT14", "TP63", "ITGB1", "ITGA6")
+Keratinocyte_diff = c("KRT1", "KRT10", "SBSN", "KRTDAP")
+
+
+##Keratinocyte - detailed
+Keratinocyte_basal_detailed <- c("KRT15", "KRT14", "KRT5", "COLA1", "IGFBP3", "DST", "S100A2", 
+                                 "MIR205HG", "CXCL14", "TGFBI", "ASS1", "ATP1B3", "PDLIM1", "CYR61", 
+                                 "ALDH3A1", "SYT8", "RND3", "KLK5", "CTNNAL1", "S100A10", "TNFRSF12A", 
+                                 "EDN1", "HOPX", "POSTN", "CAV1", "CAV2", "TGIF1", "TAX1BP3")
+
+Keratinocyte_Spinous_detailed <- c("KRT1", "KRT10", "KRTDAP", "DMKN", "LY3", "DEFB1", "LY6D", "RHOV", 
+                                   "LGALS7", "SBSN", "KCNK7", "DBI", "PHLDA2", "CRABP2", "LGALS7B", "DSP", 
+                                   "APOE", "EMP2", "S100A14", "THBD", 
+                          "GLTP", "OVOL1", "SFN", "DEGS1", "PYCARD", "AQP3", "ALDH2", "CCND1", "CHP2")
+
+Keratinocyte_Granular_detailed <- c("CALML5", "SLURP1", "SPRR1B", "KRT2", "FLG", "SBSN", "CSTA", "FABP5", "KRTDAP", 
+                           "SULT2B1", "SPRR1A", "CNFN", "LYNX1", "SPINK5", "LYPD3", "CLIC3", "CARD18", "LY6G6C", 
+                           "DMKN", "KLK7", "TMEM45A", "TMEM99", "SCEL", "SPRR2D", "BLMH", "IVL", "KLK11", "KRT77", 
+                           "PYDC1")
+
+##Melanocyte ####
+Melanocyte <- c("DCT", "TYRP1", "MLANA", "PMEL", "MITF", "VIM", "CD59", "QPCT")
+
+Melanocyte_v1 = c("PMEL", "MLANA", "TYRP1", "DCT")
+
+Melanocyte_detailed <- c("DCT", "TYRP1", "MLANA", "PMEL", "MITF", "VIM", "CD59", "QPCT", 
+                         "SAT1", "CAPN3", "PLP1", "CD63", "S100A1", "GPM6B", "EMP3", "BCAN", 
+                         "CYB561A3", "SDCBP", "IGFBP7", "PHLDA1", "C4orf48", "TYR", "PCSK2", 
+                         "CDC42EP3", "MFSD12", "APOD", "SNCA", "SERPINE2", "PSAP")
+
+Melanocyte_1 <- c("CTNNAL1", "COL17A1","KRT15", "IGFBP3", "FTH1", "ASS1", "DST", "PDLIM1", 
+                  "KLK5", "DLK2", "BCAM", "CXCL14", "S100A10", "SPARC", "JAG2", "HOPX", "SNCA", 
+                  "EFEMP1", "TGFBI", "CAV1", "ATP1B3", "SYT8", "KRT14", "ASCL2", "CYR61", "ITGB1", 
+                  "ALDH3A1", "PTRF", "ITGB4")
+
+Melanocyte_2 <- c()
+
+Melanocyte_3 <- c()
+
+
+#Fibroblast ####
+Fibroblast <- c("CFD", "DCN", "IGFBP6", "COL1A2", "MGP", "COL1A1", "GSN", "IGFBP5", "MFAP4", "LGALS1")
+
+Fibroblast_v1 = c("PDGFRA", "LUM", "DCN", "VIM", "COL1A2")
+
+Fibroblast_detailed <- c("CFD", "DCN", "IGFBP6", "COL1A2", "MGP", "COL1A1", "GSN", "IGFBP5", "MFAP4", 
+                         "LGALS1", "COL3A1", "COL6A2", "S100A6", "APOD", "MMP2", "PLAC9", "CCDC80", 
+                         "SOD3", "FSTL1", "S100A4", "VIM", "C1S", "FBLN1", "TNXB", "TIMP3", "CFH", 
+                         "ADH1B", "SPARC", "COL6A1", "C1R", "FBN1", "CST3", "MFAP5")
+
+#Fibroblast - papillary , reticular
+Papillary_fibroblast <- c("APCDD1", "COMP", "RGS16", "ID1", "HBB", "RGS2", "COL18A1", 
+                          "DUSP1", "HBA2", "WIF1", "ARRDC3", "NKD2", "DDIT4", "LEPR")
+
+Reticular_fibroblast <- c("WISP2","SLPI","CTHRC1","FBLN1", 
+                          "IGFBP6","PCSK1N","TSPAN8","MFAP5","DCN","CFD","MMP2","CRYAB",
+                          "COL1A2","COL1A1","PI16","SERPINF1")
+
+Pro_inflammatory_fibroblast <- c("CXCL3", "CXCL2", "CXCL1", "C11orf96", "SOD2", "CCL2", 
+                                 "TNFAIP6", "GEM", "MEDAG", "IL6", "EIF4A3", "ARID5B", 
+                                 "WTAP", "UAP1", "H2AFZ")
+
+Mesenchymal_fibroblast <- c("COCH", "ASPN", "POSTN", "TNN", "DPEP1", "COL11A1", "SFRP1", 
+                            "HTRA1", "MRPS6", "GPC3", "SPARCL1", "PPAPDC1B", "C9orf3", 
+                            "GPM6B", "COL5A2", "FIBIN")
+```
+
+
+```{r Collagen set}
+#Heatmap - collagen group
+collagen.gene.set <- c("COL1A1", "COL1A2", "COL2A1", "COL3A1", "COL4A1", "COL4A2",
+                       "COL4A3", "COL4A5", "COL4A6", "COL5A1", "COL5A2", "COL5A3",
+                       "COL6A1", "COL6A2", "COL6A3", "COL6A5", "COL6A6", "COL7A1",
+                       "COL8A1", "COL8A2", "COL9A1", "COL9A2", "COL9A3", "COL10A1",
+                       "COL11A1", "COL11A2", "COL12A1", "COL13A1", "COL14A1", "COL15A1",
+                       "COL16A1", "COL17A1", "COL18A1", "COL19A1", "COL21A1", "COL22A1",
+                       "COL23A1", "COL24A1", "COL25A1", "COL27A1", "COL28A1")
+
+DoHeatmap(Fb_old, features = collagen.gene.set) + NoLegend()
+```
+
+
+```{r immune cell}
+###Immune cell
+
+Immune_cells <- c("HL-DRA", "CD74", "HLA-DRB1", "HLA-D1", "HLA-DPA1", 
+                  "HLA-DQB1", "HLA-DQA1", "SRGN", "LYZ", "CD52", "IL32", "RGS1", "S100A4")
+
+Immune_cells_detailed <- c("HL-DRA", "CD74", "HLA-DRB1", "HLA-D1", "HLA-DPA1", "HLA-DQB1", "HLA-DQA1", "SRGN", 
+                           "LYZ", "CD52", "IL32", "RGS1", "S100A4", "FCER1A", "TYROBP", "C15orf48","G0S2", 
+                           "GPR183", "HLA-DQB2", "CXCR4", "LGALS1", "IL1B", "TMSB4X", "TMSB10", "FCER1G", 
+                           "CYBA", "LST1", "HLA-DMA", "ARHGDIB", "LTB", "VIM", "CORO1A")
+
+Macropahge_deneriticcell = c("AIF1", "LYZ", "HLA-DRA", "CD68", "ITGAX")
+
+T_cell = c("CD3D", "CD3G", "CD3E", "LCK")
+
+Vascular_endothelial_cell = c("SELE", "CLDN5", "VWF", "CDH5")
+
+Lymphatic_endothelial_cell = c("PROX1", "CLDN5", "LYVE1")
+
+
+nonImm.markers = c("EPCAM", "KRT18", "KRT19", "VWF") 
+Imm.markers = c("CD79A", "CD3E", "NKG7", "CD68", "LYZ", "LGALS2", "TPSAB1", "JCHAIN")
+Proliferating.markers = c("MKI67", "STMN1", "TOP2A")
+```
+
+
+```{r Other cells}
+Mitotic_cell <- c("HIST1H4C", "HMGB2", "TUBA1B", "STMN1", "PTTG1", "UBE2C", "H2AFZ")
+
+Mitotic_cell_detailed <- c("HIST1H4C", "HMGB2", "TUBA1B", "STMN1", "PTTG1", "UBE2C", "H2AFZ", "TK1", "KIAA0101", "MT2A", "TUBB", "NUSAP1", "CKS1B", "HMGB1", "CDK1", "HMGN2", "CENPW", "PCNA", "CKS2", "TOP2A", "DUT", "BIRC5", "TYMS", "CDKN3", "DEK", "CCNB1", "SMC4", "ZWINT", "CDC20")
+
+Vellus_hair_follicle <- c("KRT6B", "TM4SF1", "PTN", "SOX9", "FXYD6", "FRZB")
+
+Vellus_hair_follicle_detailed <- c("KRT6B", "TM4SF1", "PTN", "SOX9", "FXYD6", "FRZB", "CYP27A1", "SFRP1", "ACTN1", "LBH", "FOXC1", "LPHN3", "KRT17", "SOX4", "ATP1B1", "CD59", "KRT23", "MARCKSL1", "CHI3L1", "GJB6", "FZD7", "DDAH2", "MALAT1", "KRT6A", "ELF3", "RBP1", "PPDPF", "FAM84A", "C6orf48")
+
+#Endothelial cells
+Endothelial_cells <- c("CCL21", "DARC", "SPARCL1", "CLU", "CLDN5", "GNG11", "VIM", "TFF3", "RAMP2", "IGFBP7", "AQP1", "TM4SF1", "FABP4")
+
+Endothelial_cells_detailed <- c("CCL21", "DARC", "SPARCL1", "CLU", "CLDN5", "GNG11", "VIM", "TFF3", "RAMP2", "IGFBP7", "AQP1", "TM4SF1", "FABP4", "RGS16", "ECSCR", "HLA-DRB1", "IL6", "RAMP3", "IFITM2", "IGFBP4", "PLVAP", "GIMAP7", "EGFL7", "SELE", "CLEC14A", "TFPI", "RNASE1", "HLA-DRA", "A2M")
+
+#Pericyte
+Pericyte <- c("ACTA2", "TAGLN", "MYL9", "TPM2", "IGFB7", "MYLK", "MYH11", "CCL2", "RERGL")
+
+Pericyte_v1 = c("ACTA2", "RGS5", "PDGFRB")
+
+Pericyte_detailed <- c("ACTA2", "TAGLN", "MYL9", "TPM2", "IGFB7", "MYLK", "MYH11", "CCL2", "RERGL","RGS16", "CALD1", "SPARCL1", "TPM1", "ACTG2", "VIM", "LBH", "CTGF", "SELM", "MCAM","PPP1R14A", "PLN", "CNN1", "TINAGL1", "SORBS2", "SNCG", "IGFBP5", "SOD3", "MF8", "TIMP3", "MAP1B", "LGALS1", "C11orf96", "CPE", "LMOD1")
+
+
+Orbicularis_oculi_muscle <- c("CKM", "MYL1", "MB", "TCAP", "COX6A2", "ENO3", "DES", "TNNC1")
+
+Orbicularis_oculi_muscle_detailed <- c("CKM", "MYL1", "MB", "TCAP", "COX6A2", "ENO3", "DES", "TNNC1", "ACTC1", "KLHL41", "MYOZ1", "CSRP3", "PGAM2", "SMPX", "PYGM", "STAC3", "PVALB", "ATP2A1", "MYOT", "ACTN2", "ANK1", "TRDN", "HSPB6", "HSPB7", "NEB", "RP11-353N4.1", "FITM1", "LINC00948", "TTN", "ANKRD1", "HSPB3", "MYBPC1", "NRAP")
+
+#Erythrocyte
+Erythrocyte = c("HBA1", "HBA2", "HBB")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

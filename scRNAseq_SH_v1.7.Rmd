@@ -1,0 +1,1029 @@
+---
+title: "scRNAseq_SH"
+output: html_document
+date: "2023-11-30"
+---
+
+```{r setup, include=FALSE_Windows version}
+knitr::opts_knit$set(root.dir = "~/scRNA/GSE130973_fb.priming_filtered/rawdata")
+```
+
+```{r setup, include=FALSE_Mac}
+knitr::opts_knit$set(root.dir = "/Users/home/Downloads/BioData/GSE130973_fb.priming_filtered/rawdata")
+```
+
+```{r preprocessing}
+
+Sys.setenv(LANG = "en") 
+
+## 2. Create seurat object
+library(Seurat)
+library(ggplot2)
+library(tidyverse)
+library(rlist)
+library(gridExtra)
+library(dplyr)
+library(patchwork)
+library(parallel)
+library(scCustomize)
+library(Rcpp)
+library(harmony)
+library(SeuratData)
+library(patchwork)
+
+set.seed(1234) # set seed
+options(future.globals.maxSize = 8000 * 1024^2) # memory expansion
+
+# Visualization 
+col36 <- DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome") # if 2< number of colors <36
+col50 <- DiscretePalette_scCustomize(num_colors = 50, palette = "varibow", shuffle_pal = TRUE) #If number of colors >36
+
+```
+
+```{r get data location_Windows}
+# get data location
+setwd("~/scRNA/GSE130973_fb.priming_filtered/rawdata")
+```
+
+
+```{r get data location_Mac}
+# get data location
+setwd("/Users/home/Downloads/BioData/GSE130973_fb.priming_filtered/rawdata")
+```
+
+
+```{r ReadMtx/ Create Seurat Object}
+# ReadMtx
+obj <- ReadMtx(mtx = paste0("GSE130973_matrix_filtered.mtx.gz"),
+                 features = paste0("GSE130973_genes_filtered.tsv.gz"),
+                 cells = paste0("GSE130973_barcodes_filtered.tsv.gz"))
+
+# Initialize the Seurat object with the raw (non-normalized data).
+obj <- CreateSeuratObject(counts = obj, min.cells = 3, min.features = 100)
+
+##################################################################################
+###참고 obj.list [["GSE130973"]] <- readRDS ("../../GSE130973/R_output/obj.rds")
+obj.list <- list ()
+obj.list [["18y"]] <- readRDS ("merged_18y.rds")
+obj.list [["76y"]] <- readRDS ("merged_76y.rds")
+##################################################################################
+
+y18 <- readRDS ("merged_18y.rds")
+y76 <- readRDS ("merged_76y.rds")
+
+c.obj <- merge(y18, y = y76)
+
+View(c.obj@meta.data)
+
+c.obj[['group']] <- c.obj[['Age']]
+
+
+dplyr::count (as.data.frame(c.obj@meta.data), orig.ident)
+dplyr::count (as.data.frame(c.obj@meta.data), group)
+
+save(c.obj, file = "../R_output/c.obj.Rda")
+
+####################################################(non-execution)
+#1.Create metadata dataframe ####
+metadata <- c.obj@meta.data
+
+# Add cell IDs to metadata
+metadata$sampleID <- rownames(metadata)
+View(c.obj@meta.data)
+
+# create a sample column
+c.obj$sampleID <- rownames(c.obj@meta.data)
+
+# split sample column
+c.obj@meta.data <- separate(c.obj@meta.data, col = 'sampleID', into = c('age', 'barcode'), 
+                             sep = '_')
+#2.tagging each data set ####
+# 새로운 컬럼 생성하고, 초기값을 NA로 설정합니다.
+c.obj@meta.data$group <- NA
+
+# "group" 컬럼 값이 1, 2, 3, 4인 행에 "win"값 할당합
+c.obj@meta.data$group[c.obj@meta.data$age %in% C(18)] <- "old"
+c.obj@meta.data$group[c.obj@meta.data$age %in% c(76)] <- "old"
+#####################################################################
+
+
+```
+
+
+```{r QC and filtering}
+## 3. QC and filtering
+# 3.1. mitochondrial RNA quantification
+c.obj$percent.mt <- PercentageFeatureSet(c.obj, pattern = '^MT-')
+
+# 3.2. Add number of genes per UMI for each cell to metadata
+c.obj$log10GenesPerUMI <- log10(c.obj$nFeature_RNA) / log10(c.obj$nCount_RNA)
+
+# 3.3. visualization 
+# if 2< number of colors <36
+col36 <- DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome")
+#If number of colors >36
+col50 <- DiscretePalette_scCustomize(num_colors = 50, palette = "varibow", shuffle_pal = TRUE) 
+
+tiff(filename = paste0('../R_output/','VlnPlot_before_QC.tiff'),
+     res = 150, width = 30, height = 10, units = 'in', compression = c( "lzw") )
+v1 <- VlnPlot_scCustom (c.obj, features = c("nFeature_RNA","nCount_RNA","percent.mt"), pt.size=0.01)
+v2 <- VlnPlot_scCustom (c.obj, features = c("nFeature_RNA","nCount_RNA","percent.mt"), pt.size=0.01, group.by = 'group', colors_use=col36)
+v1|v2
+dev.off()
+
+tiff(filename = paste0('../R_output/','FeatureScatterPlot_before_QC.tiff'),
+     res = 150, width = 30, height = 10, units = 'in', compression = c( "lzw") )
+fs1 <- FeatureScatter (c.obj, feature1="nCount_RNA", feature2= "nFeature_RNA", pt.size=0.01) + geom_smooth(method="lm")
+fs2 <- FeatureScatter (c.obj, feature1="nCount_RNA", feature2= "nFeature_RNA", split.by = 'group', pt.size=0.01) +  geom_smooth(method="lm")
+fs1|fs2
+dev.off()
+
+# 3.4. filtering
+c.obj.filtered <- subset(c.obj, subset= nFeature_RNA > 100  &  nFeature_RNA < 4000 &
+                             nCount_RNA > 100 & nCount_RNA < 20000 &
+                             percent.mt < 5)
+
+count(as.data.frame(c.obj.filtered@meta.data), group)
+
+# 3.5. visualization 
+tiff(filename = paste0('../R_output/','VlnPlot_after_QC.tiff'),
+     res = 150, width = 30, height = 10, units = 'in', compression = c( "lzw") )
+v1 <- VlnPlot_scCustom (c.obj.filtered, features = c("nFeature_RNA","nCount_RNA","percent.mt"), pt.size=0.01)
+v2 <- VlnPlot_scCustom (c.obj.filtered, features = c("nFeature_RNA","nCount_RNA","percent.mt"), pt.size=0.01, 
+                        group.by = 'group', colors_use=col36)
+v1|v2
+dev.off()
+
+tiff(filename = paste0('../R_output/','FeatureScatterPlot_after_QC.tiff'),
+     res = 150, width = 30, height = 10, units = 'in', compression = c( "lzw") )
+fs1 <- FeatureScatter (c.obj.filtered, feature1="nCount_RNA", feature2= "nFeature_RNA", pt.size=0.01) + geom_smooth(method="lm")
+fs2 <- FeatureScatter (c.obj.filtered, feature1="nCount_RNA", feature2= "nFeature_RNA", 
+                       split.by = 'group', pt.size=0.01) +  geom_smooth(method="lm")
+fs1|fs2
+dev.off()
+
+save(c.obj.filtered, file = "../R_output/c.obj.filtered.Rda")
+```
+
+```{r Doublet removal}
+# Doublet removal
+library(DoubletFinder)
+
+#1.Pre-process Seurat object (standard) --------------------------------------------------------------------------------------
+
+c.obj.filtered <- NormalizeData(c.obj.filtered)
+c.obj.filtered <- FindVariableFeatures(c.obj.filtered, selection.method = "vst", nfeatures = 2000)
+c.obj.filtered <- ScaleData(c.obj.filtered)
+c.obj.filtered <- RunPCA(c.obj.filtered)
+c.obj.filtered <- RunUMAP(c.obj.filtered, dims = 1:10)
+
+#2.pK Identification (no ground-truth) ---------------------------------------------------------------------------------------
+sweep.res.list_c.obj <- paramSweep(c.obj.filtered, PCs = 1:30, sct = FALSE)
+sweep.stats_c.obj <- summarizeSweep(sweep.res.list_c.obj, GT = FALSE)
+bcmvn_c.obj <- find.pK(sweep.stats_c.obj)
+bcmvn_c.obj
+
+## pK Identification (ground-truth) ------------------------------------------------------------------------------------------
+sweep.res.list_c.obj <- paramSweep(c.obj.filtered, PCs = 1:10, sct = FALSE)
+gt.calls <- seu_kidney@meta.data[rownames(sweep.res.list_kidney[[1]]), "GT"].   
+
+## GT is a vector containing "Singlet" and "Doublet" calls recorded using sample multiplexing classification and/or in silico geneotyping results 
+sweep.stats_kidney <- summarizeSweep(sweep.res.list_kidney, GT = TRUE, GT.calls = gt.calls)
+bcmvn_kidney <- find.pK(sweep.stats_kidney)
+
+homotypic.prop <- modelHomotypic(c.obj.filtered@meta.data$nFeature_SCT)
+nExp_poi<-round(0.085*nrow(c.obj.filtered@meta.data))
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+#3.Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
+c.obj.filtered <- doubletFinder(c.obj.filtered, PCs = 1:10, pN = 0.005, pK = 0.02, 
+                                nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(c.obj.filtered)
+
+c.obj.filtered <- doubletFinder(c.obj.filtered, PCs = 1:10, pN = 0.005, pK = 0.02, 
+                                nExp = nExp_poi.adj, reuse.pANN = "DF.classifications_0.005_0.02_1299", sct = FALSE)
+
+DimPlot(c.obj.filtered, group.by = "DF.classifications_0.005_0.02_1299", raster = FALSE)
+
+length(c.obj.filtered@meta.data$DF.classifications_0.005_0.02_1299)
+
+length(c.obj.filtered@meta.data$DF.classifications_0.005_0.02_1299[c.obj.filtered@meta.data$DF.classifications_0.005_0.02_1299=="Singlet"])
+length(c.obj.filtered@meta.data$DF.classifications_0.005_0.02_1299[c.obj.filtered@meta.data$DF.classifications_0.005_0.02_1299=="Doublet"])
+
+c.obj.filtered.singlet.int<-subset(c.obj.filtered, subset = DF.classifications_0.005_0.02_1299 == "Singlet")
+
+save(c.obj.filtered.singlet.int, file = "../R_output/c.obj.filtered.singlet.int.Rda")
+```
+
+```{r Integration}
+# ## 5. Integration, batch effect correction, clustering from singlets
+# ref. https://satijalab.org/seurat/articles/seurat5_integration
+# seurat version 5 사용
+
+# 5.0. visualization 
+col36 <- DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome") # if 2< number of colors <36
+col50 <- DiscretePalette_scCustomize(num_colors = 50, palette = "varibow", shuffle_pal = TRUE) #If number of colors >36
+
+# 5.1. load data
+c.obj.filtered.singlet.int <- readRDS("../R_output/c.obj.filtered.singlet.rds")
+
+c.obj.filtered.singlet.int <- c.obj.filtered
+
+# normalization
+c.obj.filtered.singlet.int <- NormalizeData(object = c.obj.filtered.singlet.int) 
+c.obj.filtered.singlet.int <- FindVariableFeatures(object = c.obj.filtered.singlet.int)
+
+# identify the top 10 most highly variable genes
+top10 <- head(VariableFeatures(c.obj.filtered.singlet.int), 10) 
+plot1<- VariableFeaturePlot(c.obj.filtered.singlet.int)
+tiff(filename = paste0('../R_output/','top10_highlyvariablegenes.tiff'),
+     res = 150,  width = 10, height = 10, units = 'in', compression = c( "lzw") )
+LabelPoints(plot=plot1, points=top10)
+dev.off()
+
+c.obj.filtered.singlet.int <- ScaleData(object = c.obj.filtered.singlet.int)
+c.obj.filtered.singlet.int <- RunPCA(object = c.obj.filtered.singlet.int)
+
+stdv <- c.obj.filtered.singlet.int [["pca"]]@stdev
+sum.stdv <- sum(c.obj.filtered.singlet.int [["pca"]]@stdev)
+percent.stdv <- (stdv / sum.stdv) * 100
+cumulative <- cumsum(percent.stdv)
+co1 <- which(cumulative > 90 & percent.stdv < 5)[1]
+co2 <- sort(which((percent.stdv[1:length(percent.stdv) - 1] - 
+                     percent.stdv[2:length(percent.stdv)]) > 0.1), 
+            decreasing = T)[1] + 1
+min.pc <- min(co1, co2)
+min.pc 
+
+c.obj.filtered.singlet.int <- FindNeighbors(c.obj.filtered.singlet.int, dims=1:min.pc)
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, 
+                                           resolution = c(0.5, 0.8, 1)) 
+c.obj.filtered.singlet.int <- RunUMAP(c.obj.filtered.singlet.int, dims=1:min.pc)
+
+# 5.2. split
+
+c.obj.filtered.singlet.int[["RNA"]] <- JoinLayers(c.obj.filtered.singlet.int[["RNA"]])
+
+c.obj.filtered.singlet.int[["RNA"]] <- split(c.obj.filtered.singlet.int[["RNA"]], 
+                                             f = c.obj.filtered.singlet.int$group)
+
+c.obj.filtered.singlet.int <- NormalizeData(c.obj.filtered.singlet.int)
+c.obj.filtered.singlet.int <- FindVariableFeatures(c.obj.filtered.singlet.int)
+
+c.obj.filtered.singlet.int <- ScaleData(c.obj.filtered.singlet.int)
+c.obj.filtered.singlet.int <- RunPCA(c.obj.filtered.singlet.int)
+
+#5.2.1 without integration
+c.obj.filtered.singlet.int <- FindNeighbors(c.obj.filtered.singlet.int, 
+                                            dims = 1:min.pc, reduction = "pca")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.5, 
+                                           cluster.name = "unintegrated_clusters_res.0.5")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.8, 
+                                           cluster.name = "unintegrated_clusters_res.0.8")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 1, 
+                                           cluster.name = "unintegrated_clusters_res.1")
+c.obj.filtered.singlet.int <- RunUMAP(c.obj.filtered.singlet.int, dims = 1:min.pc, 
+                                      reduction = "pca", reduction.name = "umap_unintegrated")
+
+d1 <- DimPlot (c.obj.filtered.singlet.int, reduction = "umap_unintegrated", 
+               group.by='orig.ident', cols=col50) + labs (title = "unintegrated_clusters_after_doublet_removal")
+
+# 5.3. Integration 
+# CCA
+c.obj.filtered.singlet.int <- IntegrateLayers(
+  object = c.obj.filtered.singlet.int, method = CCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.cca", verbose = FALSE)
+
+c.obj.filtered.singlet.int <- FindNeighbors(c.obj.filtered.singlet.int, reduction = "integrated.cca", dims = 1:min.pc)
+
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.4, 
+                                           cluster.name = "cca_clusters_res.0.4")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.5, 
+                                           cluster.name = "cca_clusters_res.0.5")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.8, 
+                                           cluster.name = "cca_clusters_res.0.8")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 1, 
+                                           cluster.name = "cca_clusters_res.1")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 2, 
+                                           cluster.name = "cca_clusters_res.2")
+
+c.obj.filtered.singlet.int <- RunUMAP(c.obj.filtered.singlet.int, reduction = "integrated.cca", 
+                                      dims = 1:min.pc, reduction.name = "umap_cca")
+
+d2 <- DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca", 
+               group.by='orig.ident', cols=col50) + labs (title = "umap.cca_after_doublet_removal")
+
+# RPCA
+c.obj.filtered.singlet.int <- IntegrateLayers(
+  object = c.obj.filtered.singlet.int, method = RPCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.rpca", verbose = FALSE)
+
+c.obj.filtered.singlet.int <- FindNeighbors(c.obj.filtered.singlet.int, reduction = "integrated.rpca", dims = 1:min.pc)
+
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.5, 
+                                           cluster.name = "rpca_clusters_res.0.5")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.8, 
+                                           cluster.name = "rpca_clusters_res.0.8")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 1, 
+                                           cluster.name = "rpca_clusters_res.1")
+
+c.obj.filtered.singlet.int <- RunUMAP(c.obj.filtered.singlet.int, reduction = "integrated.rpca", 
+                                      dims = 1:min.pc, reduction.name = "umap_rpca")
+
+d3 <- DimPlot (c.obj.filtered.singlet.int, reduction = "umap_rpca", group.by='orig.ident', cols=1:length(unique(c.obj.filtered.singlet.int$orig.ident))) + labs (title = "integrated.rpca_after_doublet_removal")
+
+# Harmony
+c.obj.filtered.singlet.int <- IntegrateLayers(
+  object = c.obj.filtered.singlet.int, method = HarmonyIntegration,
+  orig.reduction = "pca", new.reduction = "harmony", verbose = FALSE)
+
+c.obj.filtered.singlet.int <- FindNeighbors(c.obj.filtered.singlet.int, reduction = "harmony", dims = 1:min.pc)
+
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.5, 
+                                           cluster.name = "harmony_clusters_res.0.5")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 0.8, 
+                                           cluster.name = "harmony_clusters_res.0.8")
+c.obj.filtered.singlet.int <- FindClusters(c.obj.filtered.singlet.int, resolution = 1, 
+                                           cluster.name = "harmony_clusters_res.1")
+c.obj.filtered.singlet.int <- RunUMAP(c.obj.filtered.singlet.int, reduction = "harmony", 
+                                      dims = 1:min.pc, reduction.name = "umap_harmony")
+
+d4 <- DimPlot (c.obj.filtered.singlet.int, reduction = "umap_harmony", 
+               group.by='orig.ident', cols=col50) + labs (title = "umap.harmony_after_doublet_removal")
+
+```
+
+```{r Visualization of CCA, RPCA, harmony}
+## Visualization of CCA, RPCA, harmony 
+tiff(filename = paste0('../R_output/','UMAP_integration_after_doublet_removal.tiff'),
+     res = 150, width = 30, height = 10, units = 'in', compression = c( "lzw") )
+d1|d2|d3|d4
+dev.off()
+
+
+#unintegrated
+tiff(filename = paste0('../R_output/','UMAP_unintegration_cluster_after_doublet_removal.tiff'),
+     res = 150, width = 20, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_unintegrated", label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("unintegrated_clusters_res.0.5","unintegrated_clusters_res.0.8", "unintegrated_clusters_res.1")) 
+dev.off()
+
+#CCA
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal.tiff'),
+     res = 150, width = 20, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("cca_clusters_res.0.4", "cca_clusters_res.0.5", "cca_clusters_res.0.8", "cca_clusters_res.1")) 
+dev.off()
+
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal_res.0.4_group.tiff'),
+     res = 150, width = 10, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by="cca_clusters_res.0.4", split.by = "group") 
+dev.off()
+
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal_res.0.4.tiff'),
+     res = 150, width = 10, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("cca_clusters_res.0.4", "group")) 
+dev.off()
+
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal_res.0.8_group.tiff'),
+     res = 150, width = 10, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by="cca_clusters_res.0.8", split.by = "group") 
+dev.off()
+
+
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal_res.2.tiff'),
+     res = 150, width = 10, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("cca_clusters_res.2", "group")) 
+dev.off()
+
+
+tiff(filename = paste0('../R_output/','UMAP_cca_cluster_after_doublet_removal_res.2_group.tiff'),
+     res = 150, width = 10, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_cca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by="cca_clusters_res.2", split.by = "group") 
+dev.off()
+
+#RPCA
+tiff(filename = paste0('../R_output/','UMAP_rpca_cluster_after_doublet_removal.tiff'),
+     res = 150, width = 20, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_rpca",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("rpca_clusters_res.0.5", "rpca_clusters_res.0.8", "rpca_clusters_res.1")) 
+dev.off()
+
+#Harmony
+tiff(filename = paste0('../R_output/','UMAP_harmony_cluster_after_doublet_removal.tiff'),
+     res = 150, width = 20, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot (c.obj.filtered.singlet.int, reduction = "umap_harmony",  label=TRUE, label.size=4, label.color="black", cols=col50, ncol=3, group.by=c("harmony_clusters_res.0.5", "harmony_clusters_res.0.8", "harmony_clusters_res.1")) 
+dev.off()
+
+# 5.4. joint / save
+
+c.obj.filtered.singlet.int <- JoinLayers(c.obj.filtered.singlet.int)
+
+save(c.obj.filtered.singlet.int, file = "../R_output/c.obj.filtered.singlet.int.Rda")
+```
+
+```{r clustering / take a look}
+#importing
+c.obj.filtered.singlet.int <- readRDS("../R_output/c.obj.filtered.singlet.int.rds")
+Round0 <- c.obj.filtered.singlet.int
+
+# Visualization by clusters ####
+#1.cell number of each cluster
+## reduction = "umap_cca" so it needs to be changed according to integration method
+
+DefaultAssay(Round0) <- "RNA"
+Idents(object = Round0) <- ("cca_clusters_res.2")
+cell.num <- table(Round0@meta.data$cca_clusters_res.2)
+ClusterLabels = paste(names(cell.num), paste0("(n = ", cell.num, ")"))
+ClusterBreaks = names(cell.num)
+
+
+tiff(filename = paste0('../R_output/','UMAP_Round0_cluster_count_1.tiff'),
+     res = 150, width = 10, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot(object = Round0,label = TRUE, label.size = 5, reduction = "umap_cca") +
+  scale_colour_discrete(breaks = ClusterBreaks, 
+                        labels = ClusterLabels) +
+  labs(x = "UMAP 1",
+       y = "UMAP 2") 
+dev.off()
+
+#2.Dot plot to figure out clusters ####
+DotPlot(Round0, features = c("MLANA", "CDSN", "KRT1", "SPRR2G", "TRAC", "LY75")) + RotatedAxis()
+DotPlot(Round0, features = c("MLANA", "CDSN", "KRT1", "SPRR2G", "TRAC", "LY75"), cols = c("lightgrey", "red")) + RotatedAxis()
+
+DotPlot(Round0, features = c("MLANA", "CDSN", "KRT1", "SPRR2G", "TRAC", "LY75"), cols = c("lightgrey", "red")) + coord_flip()
+
+
+features_1 <- c(  "MGP","KRT5","KRT14", "KRT1","KRT10","FABP5",
+                     "CDSN",
+                     "LCE3D", 
+                     "SPRR2G",
+                     "MLANA", "TYRP1", "DCT",
+                     "CD163",
+                     "CD14","LYZ",
+                     "HLA-DRB5","HLA-DRA", "HLA-DRB1", 
+                     "HLA-DQB1","HLA-DQA1",
+                     "CD40","CIITA","LY75","LAMP3",
+                     "CTLA4","FOXP3","IL2RA","TIGIT", 
+                     "CD8B","CD8A","GZMK","GZMH",
+                     "TRBC1","TRAC",
+                     "CD3D",
+                     "GNLY", "KLRB1")
+
+Idents(object = Round0) <- fct_rev(Idents(object = Round0))
+
+tiff(filename = paste0('../R_output/','Dot_plot_initial.tiff'),
+     res = 150, width = 15, height = 10, units = 'in', compression = c( "lzw") )
+DotPlot(object = Round0, features = features_1) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.text=element_text(size=18))
+dev.off()
+
+
+#3.Finding differentially expressed features (cluster biomarkers) ####
+# find all markers of cluster 1
+cluster1.markers <- FindMarkers(Round0, ident.1 = 1)
+head(cluster1.markers, n = 5)
+
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(Round0, ident.1 = 5, ident.2 = c(0, 3))
+head(cluster5.markers, n = 5)
+
+# 4.ViolinPlot ####
+VlnPlot(Round0, features = c("IL2RA", "FOXP3", "CTLA4"))
+VlnPlot(Round0, "KRT10", pt.size = 0)
+VlnPlot(Round0, "KRT1", pt.size = 0) + geom_boxplot()
+
+# 5.FeaturePlot ####
+features_2 <- c(  "MGP","KRT5","KRT14", "KRT1","KRT10","FABP5",
+                     "CDSN",
+                     "LCE3D", 
+                     "SPRR2G",
+                     "MLANA", "TYRP1", "DCT",
+                     "CD163",
+                     "CD14","LYZ",
+                     "HLA-DRB5","HLA-DRA", "HLA-DRB1", 
+                     "HLA-DQB1","HLA-DQA1")
+
+tiff(filename = paste0('../R_output/','Features.plot1_initial.tiff'),
+     res = 150, width = 15, height = 10, units = 'in', compression = c( "lzw") )
+FeaturePlot(object = Round0, features = features_2) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.text=element_text(size=18))
+dev.off()
+
+
+features.plot2 <- c(  "CD40","CIITA","LY75","LAMP3",
+                      "CTLA4","FOXP3","IL2RA","TIGIT", 
+                      "CD8B","CD8A","GZMK","GZMH",
+                      "TRBC1","TRAC",
+                      "CD3D",
+                      "GNLY", "KLRB1")
+
+tiff(filename = paste0('../R_output/','Features.plot2_initial.tiff'),
+     res = 150, width = 15, height = 10, units = 'in', compression = c( "lzw") )
+FeaturePlot(object = Round0, features = features.plot2) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.text=element_text(size=18))
+dev.off()
+
+##5.1. FeaturePlot appilcation - co-expression
+FeaturePlot(Round0, c("KRT1", "KRT10"), blend = T)
+
+
+#6. DimPlot ####
+DimPlot(Round0)
+DimPlot(Round0, pt.size = 2)
+DimPlot(Round0, cols = c("grey", "grey", "grey", "green", "grey", "grey", "grey", "grey", "grey"))
+DimPlot(Round0, label = T)
+DimPlot(Round0) + NoAxes()
+DimPlot(Round0) + NoAxes() + NoLegend()
+
+###Save
+save(Round0, file = "../R_output/c.obj.clusters.Rda")
+
+```
+
+```{r Clustering / annotation}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+#1. FindAllMarkers
+library(limma)
+
+DimPlot(Round0, label = T)
+
+Round0.markers <- FindAllMarkers(Round0, only.pos = TRUE)
+Round0.markers %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 1)
+
+write.csv(Round0.markers, file = "../R_output/Round0.markers.csv")
+
+#2.Identification of Top 20 markers from each Clusters
+Round0.markers.top20 = Round0.markers %>% dplyr::group_by(cluster) %>% 
+  dplyr::top_n(n=20, wt=avg_log2FC);
+
+Round0_clusters=unique(Round0.markers.top20$cluster) ;
+
+for(c in 1:length(Round0_clusters)){
+  Round0.markers.top20.c = data.frame(
+    cluster=Round0.markers.top20[Round0.markers.top20$cluster %in% Round0_clusters[c], "gene"]) ;
+  colnames(Round0.markers.top20.c) = Round0_clusters[c] ;
+  if(c==1){Round0.markers.top20s = Round0.markers.top20.c} else {
+    Round0.markers.top20s = cbind(Round0.markers.top20s, Round0.markers.top20.c)}
+}
+
+write.csv(Round0.markers.top20s, file = "../R_output/Round0.markers.top20s.csv")
+
+#3.Average expression of each cluster ####
+Ave <- AggregateExpression(Round0)
+write.csv(Ave, file = "../R_output/Round0.average.gene.expression.csv")
+
+#4.scMaysomap ####
+library(scMayoMap)
+
+seurat.markers <- FindAllMarkers(Round0, method = 'MAST')
+scMayoMap.obj <- scMayoMap(data = seurat.markers, database=scMayoMapDatabase, tissue = 'skin')
+plt <- scMayoMap.plot(scMayoMap.object = scMayoMap.obj)
+
+gns <- scMayoMap.obj$markers$genes[scMayoMap.obj$markers$cluster==14 & scMayoMap.obj$markers$celltype=='Melanocyte']
+gns <- strsplit(gns, ',')[[1]]
+DotPlot(Round0, features = gns)
+
+
+#cell specific markers ####
+#5. cell type 별 marker gene list
+#Human eyelid marker list (https://www.sciencedirect.com/science/article/pii/S1534580720308777#app2)
+##
+Keratinocyte_basal <- c("KRT15", "KRT14", "KRT5", "COLA1", "IGFBP3", "DST", "S100A2", "MIR205HG")
+
+Mitotic_cell <- c("HIST1H4C", "HMGB2", "TUBA1B", "STMN1", "PTTG1", "UBE2C", "H2AFZ")
+
+Vellus_hair_follicle <- c("KRT6B", "TM4SF1", "PTN", "SOX9", "FXYD6", "FRZB")
+
+Melanocyte <- c("DCT", "TYRP1", "MLANA", "PMEL", "MITF", "VIM", "CD59", "QPCT")
+
+
+Keratinocyte_Spinous <- c("KRT1", "KRT10", "KRTDAP", "DMKN", "LY3", "DEFB1", "LY6D", "RHOV", "LGALS7")
+
+Keratinocyte_Granular <- c("CALML5", "SLURP1", "SPRR1B", "KRT2", "FLG", "SBSN", "CSTA", "FABP5", "KRTDAP", "SULT2B1")
+
+Endothelial_cells <- c("CCL21", "DARC", "SPARCL1", "CLU", "CLDN5", "GNG11", "VIM", "TFF3", "RAMP2", "IGFBP7", "AQP1", "TM4SF1", "FABP4")
+
+Immune_cells <- c("HL-DRA", "CD74", "HLA-DRB1", "HLA-D1", "HLA-DPA1", "HLA-DQB1", "HLA-DQA1", "SRGN", "LYZ", "CD52", "IL32", "RGS1", "S100A4")
+
+Fibroblast <- c("CFD", "DCN", "IGFBP6", "COL1A2", "MGP", "COL1A1", "GSN", "IGFBP5", "MFAP4", "LGALS1")
+
+Pericyte <- c("ACTA2", "TAGLN", "MYL9", "TPM2", "IGFB7", "MYLK", "MYH11", "CCL2", "RERGL")
+
+Orbicularis_oculi_muscle <- c("CKM", "MYL1", "MB", "TCAP", "COX6A2", "ENO3", "DES", "TNNC1")
+
+
+
+
+##########
+Keratinocyte_basal <- c("KRT15", "KRT14", "KRT5", "COLA1", "IGFBP3", "DST", "S100A2", "MIR205HG", "CXCL14", "TGFBI", "ASS1", "ATP1B3", "PDLIM1", "CYR61", "ALDH3A1", "SYT8", "RND3", "KLK5", "CTNNAL1", "S100A10", "TNFRSF12A", "EDN1", "HOPX", "POSTN", "CAV1", "CAV2", "TGIF1", "TAX1BP3")
+
+Mitotic_cell <- c("HIST1H4C", "HMGB2", "TUBA1B", "STMN1", "PTTG1", "UBE2C", "H2AFZ", "TK1", "KIAA0101", "MT2A", "TUBB", "NUSAP1", "CKS1B", "HMGB1", "CDK1", "HMGN2", "CENPW", "PCNA", "CKS2", "TOP2A", "DUT", "BIRC5", "TYMS", "CDKN3", "DEK", "CCNB1", "SMC4", "ZWINT", "CDC20")
+
+Vellus_hair_follicle <- c("KRT6B", "TM4SF1", "PTN", "SOX9", "FXYD6", "FRZB", "CYP27A1", "SFRP1", "ACTN1", "LBH", "FOXC1", "LPHN3", "KRT17", "SOX4", "ATP1B1", "CD59", "KRT23", "MARCKSL1", "CHI3L1", "GJB6", "FZD7", "DDAH2", "MALAT1", "KRT6A", "ELF3", "RBP1", "PPDPF", "FAM84A", "C6orf48")
+
+Melanocyte <- c("DCT", "TYRP1", "MLANA", "PMEL", "MITF", "VIM", "CD59", "QPCT", "SAT1", "CAPN3", "PLP1", "CD63", "S100A1", "GPM6B", "EMP3", "BCAN", "CYB561A3", "SDCBP", "IGFBP7", "PHLDA1", "C4orf48", "TYR", "PCSK2", "CDC42EP3", "MFSD12", "APOD", "SNCA", "SERPINE2", "PSAP")
+
+
+Keratinocyte_Spinous <- c("KRT1", "KRT10", "KRTDAP", "DMKN", "LY3", "DEFB1", "LY6D", "RHOV", "LGALS7", "SBSN", "KCNK7", "DBI", "PHLDA2", "CRABP2", "LGALS7B", "DSP", "APOE", "EMP2", "S100A14", "THBD", "GLTP", "OVOL1", "SFN", "DEGS1", "PYCARD", "AQP3", "ALDH2", "CCND1", "CHP2")
+
+Keratinocyte_Granular <- c("CALML5", "SLURP1", "SPRR1B", "KRT2", "FLG", "SBSN", "CSTA", "FABP5", "KRTDAP", "SULT2B1", "SPRR1A", "CNFN", "LYNX1", "SPINK5", "LYPD3", "CLIC3", "CARD18", "LY6G6C", "DMKN", "KLK7", "TMEM45A", "TMEM99", "SCEL", "SPRR2D", "BLMH", "IVL", "KLK11", "KRT77", "PYDC1")
+
+Endothelial_cells <- c("CCL21", "DARC", "SPARCL1", "CLU", "CLDN5", "GNG11", "VIM", "TFF3", "RAMP2", "IGFBP7", "AQP1", "TM4SF1", "FABP4", "RGS16", "ECSCR", "HLA-DRB1", "IL6", "RAMP3", "IFITM2", "IGFBP4", "PLVAP", "GIMAP7", "EGFL7", "SELE", "CLEC14A", "TFPI", "RNASE1", "HLA-DRA", "A2M")
+
+Immune_cells <- c("HL-DRA", "CD74", "HLA-DRB1", "HLA-D1", "HLA-DPA1", "HLA-DQB1", "HLA-DQA1", "SRGN", "LYZ", "CD52", "IL32", "RGS1", "S100A4", "FCER1A", "TYROBP", "C15orf48","G0S2", "GPR183", "HLA-DQB2", "CXCR4", "LGALS1", "IL1B", "TMSB4X", "TMSB10", "FCER1G", "CYBA", "LST1", "HLA-DMA", "ARHGDIB", "LTB", "VIM", "CORO1A")
+
+Fibroblast <- c("CFD", "DCN", "IGFBP6", "COL1A2", "MGP", "COL1A1", "GSN", "IGFBP5", "MFAP4", "LGALS1", "COL3A1", "COL6A2", "S100A6", "APOD", "MMP2", "PLAC9", "CCDC80", "SOD3", "FSTL1", "S100A4", "VIM", "C1S", "FBLN1", "TNXB", "TIMP3", "CFH", "ADH1B", "SPARC", "COL6A1", "C1R", "FBN1", "CST3", "MFAP5")
+
+Pericyte <- c("ACTA2", "TAGLN", "MYL9", "TPM2", "IGFB7", "MYLK", "MYH11", "CCL2", "RERGL","RGS16", "CALD1", "SPARCL1", "TPM1", "ACTG2", "VIM", "LBH", "CTGF", "SELM", "MCAM","PPP1R14A", "PLN", "CNN1", "TINAGL1", "SORBS2", "SNCG", "IGFBP5", "SOD3", "MF8", "TIMP3", "MAP1B", "LGALS1", "C11orf96", "CPE", "LMOD1")
+
+Orbicularis_oculi_muscle <- c("CKM", "MYL1", "MB", "TCAP", "COX6A2", "ENO3", "DES", "TNNC1", "ACTC1", "KLHL41", "MYOZ1", "CSRP3", "PGAM2", "SMPX", "PYGM", "STAC3", "PVALB", "ATP2A1", "MYOT", "ACTN2", "ANK1", "TRDN", "HSPB6", "HSPB7", "NEB", "RP11-353N4.1", "FITM1", "LINC00948", "TTN", "ANKRD1", "HSPB3", "MYBPC1", "NRAP")
+
+
+
+Melanocyte_1 <- c("CTNNAL1", "COL17A1","KRT15", "IGFBP3", "FTH1", "ASS1", "DST", "PDLIM1", "KLK5", "DLK2", "BCAM", "CXCL14", "S100A10", "SPARC", "JAG2", "HOPX", "SNCA", "EFEMP1", "TGFBI", "CAV1", "ATP1B3", "SYT8", "KRT14", "ASCL2", "CYR61", "ITGB1", "ALDH3A1", "PTRF", "ITGB4")
+
+Melanocyte_2 <- c()
+
+Melanocyte_3 <- c()
+
+
+##Structural cell
+Keratinocyte_undiff = c("KRT5", "KRT14", "TP63", "ITGB1", "ITGA6")
+Keratinocyte_diff = c("KRT1", "KRT10", "SBSN", "KRTDAP")
+
+Fibroblast = c("PDGFRA", "LUM", "DCN", "VIM", "COL1A2")
+
+Melanocyte = c("PMEL", "MLANA", "TYRP1", "DCT")
+
+Pericyte = c("ACTA2", "RGS5", "PDGFRB")
+Erythrocyte = c("HBA1", "HBA2", "HBB")
+
+###Immune cell
+Macropahge_deneriticcell = c("AIF1", "LYZ", "HLA-DRA", "CD68", "ITGAX")
+T_cell = c("CD3D", "CD3G", "CD3E", "LCK")
+
+Vascular_endothelial_cell = c("SELE", "CLDN5", "VWF", "CDH5")
+Lymphatic_endothelial_cell = c("PROX1", "CLDN5", "LYVE1")
+
+nonImm.markers = c("EPCAM", "KRT18", "KRT19", "VWF") 
+Imm.markers = c("CD79A", "CD3E", "NKG7", "CD68", "LYZ", "LGALS2", "TPSAB1", "JCHAIN")
+Proliferating.markers = c("MKI67", "STMN1", "TOP2A")
+
+```
+
+
+```{r Visualization of each cluster}
+##5.1.FeaturePlot ####
+FeaturePlot (Round0, features = Melanocyte, reduction ="umap_cca")
+FeaturePlot (Round0, features = Keratinocyte_Spinous, reduction ="umap_cca")
+FeaturePlot (Round0, features = Immune_cells, reduction ="umap_cca")
+FeaturePlot (Round0, features = T_cell, reduction ="umap_cca")
+
+##5.2.ViolinPlot ####
+VlnPlot(Round0, features = c("IL2RA", "FOXP3", "CTLA4"))
+VlnPlot(Round0, features = Keratinocyte_diff)
+```
+
+
+```{r Annotation}
+#1.0. visualization #### 
+col36 <- DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome") # if 2< number of colors <36
+col50 <- DiscretePalette_scCustomize(num_colors = 50, palette = "varibow", shuffle_pal = TRUE) #If number of colors >36
+
+#1.naming the clusters ####
+Round0$annot_1st = "" ;
+
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(0),]$annot_1st <- "Dendritic Cells" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(1),]$annot_1st <- "Fibroblast_1" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(2),]$annot_1st <- "Fibroblast_2" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(3),]$annot_1st <- "Fibroblast_3" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(4,14),]$annot_1st <- "Vascular_endothelial_cell" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(5,12),]$annot_1st <- "Keratinocyte_diffe" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(6),]$annot_1st <- "T_cell" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(7),]$annot_1st <- "Pericyte" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(8,9),]$annot_1st <- "Keratinocyte_undiffe" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(10),]$annot_1st <- "Fibroblast_4" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(11),]$annot_1st <- "Lymphatic_endothelial_cell" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(13),]$annot_1st <- "Erythrocyte" ;
+Round0@meta.data[Round0@meta.data$cca_clusters_res.2 %in% c(15),]$annot_1st <- "Melanocyte" ;
+
+DimPlot(Round0, label = T, group.by = "annot_1st")
+
+tiff(filename = paste0('../R_output/','UMAP_Round0_cluster_annotation.tiff'),
+     res = 800, width = 10, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot(object = Round0,label = TRUE, label.size = 5, group.by = "annot_1st", reduction = "umap_cca") +
+  scale_colour_discrete(breaks = ClusterBreaks, 
+                        labels = ClusterLabels) +
+  labs(x = "UMAP 1",
+       y = "UMAP 2") 
+dev.off()
+
+#2.cluster count####
+DefaultAssay(Round0) <- "RNA"
+Idents(object = Round0) <- ("annot_1st")
+cell.num <- table(Round0@meta.data$annot_1st)
+ClusterLabels = paste(names(cell.num), paste0("(n = ", cell.num, ")"))
+ClusterBreaks = names(cell.num)
+
+tiff(filename = paste0('../R_output/','UMAP_Round0_cluster_annot_count.tiff'),
+     res = 100, width = 10, height = 10, units = 'in', compression = c( "lzw") )
+DimPlot(object = Round0,label = TRUE, label.size = 4, reduction = "umap_cca") +
+  scale_colour_discrete(breaks = ClusterBreaks, 
+                        labels = ClusterLabels) +
+  labs(x = "UMAP 1",
+       y = "UMAP 2") 
+dev.off()
+
+###Save
+save(Round0, file = "../R_output/c.obj.clusters.annot_1st.Rda")
+```
+
+
+```{r sub-cluster_old}
+Round1 <- Round0
+
+#3.Discovery of sub-cluster #####
+Fb_old <-subset(Round1, subset = cca_clusters_res.0.4 %in% c(1,2,3,10))
+Fb_old <-subset(Fb_old, subset = group == "old")            
+                
+View(Fb_old@meta.data)
+
+#Save
+save(Fb_old, file = "../R_output/Fb_old.Rda")
+
+DimPlot(Fb_old)
+DimPlot(Fb_old, label = T, group.by = "annot_1st") + NoAxes() + NoLegend()
+
+#Discovery of sub-cluster
+Fb_old = NormalizeData(Fb_old, normalization.method = "LogNormalize", scale.factor = 10000)
+Fb_old = FindVariableFeatures(Fb_old, selection.method = "vst", nfeatures = 2000)
+Fb_old = ScaleData(Fb_old, features = rownames(Fb_old))
+Fb_old = RunPCA(Fb_old, features = VariableFeatures(object = Fb_old), npcs=100)
+
+Fb_old = RunUMAP(Fb_old, reduction = "harmony", dims=1:20, seed.use = 1234) 
+Fb_old = RunTSNE(Fb_old, reduction = "harmony", dims=1:20, seed.use = 1234) 
+
+Fb_old = FindNeighbors(Fb_old, reduction = "harmony", dims = 1:20) 
+Fb_old = FindClusters(Fb_old, resolution = 0.1) 
+DimPlot(Fb_old, reduction = "umap", group.by = "seurat_clusters", pt.size = 0.001, label=T)
+
+# sub-cluster count####
+DefaultAssay(Fb_old) <- "RNA"
+Idents(object = Fb_old) <- ("seurat_clusters")
+cell.num <- table(Fb_old@meta.data$RNA_snn_res.0.2 )
+ClusterLabels = paste(names(cell.num), paste0("(n = ", cell.num, ")"))
+ClusterBreaks = names(cell.num)
+
+tiff(filename = paste0('../R_output/','UMAP_Fb_old_cluster_annot_count.tiff'),
+     res = 150, width = 5, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot(object = Fb_old,label = TRUE, label.size = 4, reduction = "umap") +
+  scale_colour_discrete(breaks = ClusterBreaks, 
+                        labels = ClusterLabels) +
+  labs(x = "UMAP 1",
+       y = "UMAP 2") 
+dev.off()
+
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(Fb_old, ident.1 = 2)
+head(cluster2.markers, n = 5)
+
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster3.markers <- FindMarkers(Fb_old, ident.1 = 3, ident.2 = c(0, 2))
+head(cluster3.markers, n = 5)
+
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+Fb_old.markers <- FindAllMarkers(Fb_old, only.pos = TRUE)
+Fb_old.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1)
+
+write.csv(Fb_old.markers, file = "../R_output/Fb_old.markers.csv")
+
+#Heatmap
+Fb_old.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 10) %>%
+    ungroup() -> top10
+DoHeatmap(Fb_old, features = top10$gene) + NoLegend()
+
+#Heatmap - collagen group
+collagen.gene.set <- c("COL1A1", "COL1A2", "COL2A1", "COL3A1", "COL4A1", "COL4A2",
+                       "COL4A3", "COL4A5", "COL4A6", "COL5A1", "COL5A2", "COL5A3",
+                       "COL6A1", "COL6A2", "COL6A3", "COL6A5", "COL6A6", "COL7A1",
+                       "COL8A1", "COL8A2", "COL9A1", "COL9A2", "COL9A3", "COL10A1",
+                       "COL11A1", "COL11A2", "COL12A1", "COL13A1", "COL14A1", "COL15A1",
+                       "COL16A1", "COL17A1", "COL18A1", "COL19A1", "COL21A1", "COL22A1",
+                       "COL23A1", "COL24A1", "COL25A1", "COL27A1", "COL28A1")
+
+DoHeatmap(Fb_old, features = collagen.gene.set) + NoLegend()
+
+#Fibroblast - papillary , reticular
+Papillary_fibroblast <- c("APCDD1", "COMP", "RGS16", "ID1", "HBB", "RGS2", "COL18A1", "DUSP1", "HBA2", "WIF1", "ARRDC3", "NKD2", "DDIT4", "LEPR")
+
+Reticular_fibroblast <- c("WISP2","SLPI","CTHRC1","FBLN1", "IGFBP6","PCSK1N","TSPAN8","MFAP5","DCN","CFD","MMP2","CRYAB","COL1A2","COL1A1","PI16","SERPINF1")
+
+Pro_inflammatory_fibroblast <- c("CXCL3", "CXCL2", "CXCL1", "C11orf96", "SOD2", "CCL2", "TNFAIP6", "GEM", "MEDAG", "IL6", "EIF4A3", "ARID5B", "WTAP", "UAP1", "H2AFZ")
+
+Mesenchymal_fibroblast <- c("COCH", "ASPN", "POSTN", "TNN", "DPEP1", "COL11A1", "SFRP1", "HTRA1", "MRPS6", "GPC3", "SPARCL1", "PPAPDC1B", "C9orf3", "GPM6B", "COL5A2", "FIBIN")
+
+#FeaturePlot
+FeaturePlot (Fb_old, features = Mesenchymal_fibroblast, reduction ="umap")
+
+#naming the sub-clusters
+Fb_old$annot_2nd = "" ;
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(0),]$annot_2nd <- "Pro_inflammatory" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(1),]$annot_2nd <- "Papillary" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(2),]$annot_2nd <- "Mesenchymal" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(3),]$annot_2nd <- "Reticular" 
+
+Idents(Fb_old) = "annot_2nd" 
+
+DimPlot(Fb_old, group.by = "annot_2nd", reduction = "umap", label=T)
+
+tiff(filename = paste0('../R_output/','UMAP_Fb_old_cluster_annot.tiff'), res = 150)
+DimPlot(Fb_old, group.by = "annot_2nd", reduction = "umap", label=T)
+dev.off()
+
+save(Fb_old, file = "../R_output/Fb_old.cluster.Rda")
+```
+
+
+```{r sub-cluster}
+Round1 <- Round0
+
+#3.Discovery of sub-cluster #####
+Fb_old <-subset(Round1, subset = cca_clusters_res.2 %in% c(1,2,3,10))
+Fb_old <-subset(Fb_old, subset = group == "old")            
+                
+View(Fb_old@meta.data)
+
+#Save
+save(Fb_old, file = "../R_output/Fb_old.Rda")
+
+DimPlot(Fb_old)
+DimPlot(Fb_old, label = T, group.by = "annot_1st") + NoAxes() + NoLegend()
+
+#Discovery of sub-cluster
+Fb_old = NormalizeData(Fb_old, normalization.method = "LogNormalize", scale.factor = 10000)
+Fb_old = FindVariableFeatures(Fb_old, selection.method = "vst", nfeatures = 2000)
+Fb_old = ScaleData(Fb_old, features = rownames(Fb_old))
+Fb_old = RunPCA(Fb_old, features = VariableFeatures(object = Fb_old), npcs=100)
+
+Fb_old = RunUMAP(Fb_old, reduction = "harmony", dims=1:20, seed.use = 1234) 
+Fb_old = RunTSNE(Fb_old, reduction = "harmony", dims=1:20, seed.use = 1234) 
+
+Fb_old = FindNeighbors(Fb_old, reduction = "harmony", dims = 1:20) 
+Fb_old = FindClusters(Fb_old, resolution = 0.2) 
+DimPlot(Fb_old, reduction = "umap", group.by = "seurat_clusters", pt.size = 0.001, label=T)
+
+# sub-cluster count####
+DefaultAssay(Fb_old) <- "RNA"
+Idents(object = Fb_old) <- ("seurat_clusters")
+cell.num <- table(Fb_old@meta.data$RNA_snn_res.0.2 )
+ClusterLabels = paste(names(cell.num), paste0("(n = ", cell.num, ")"))
+ClusterBreaks = names(cell.num)
+
+tiff(filename = paste0('../R_output/','UMAP_Fb_old_cluster_annot_count.tiff'),
+     res = 150, width = 5, height = 5, units = 'in', compression = c( "lzw") )
+DimPlot(object = Fb_old,label = TRUE, label.size = 4, reduction = "umap") +
+  scale_colour_discrete(breaks = ClusterBreaks, 
+                        labels = ClusterLabels) +
+  labs(x = "UMAP 1",
+       y = "UMAP 2") 
+dev.off()
+
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(Fb_old, ident.1 = 2)
+head(cluster2.markers, n = 5)
+
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster3.markers <- FindMarkers(Fb_old, ident.1 = 3, ident.2 = c(0, 2))
+head(cluster3.markers, n = 5)
+
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+Fb_old.markers <- FindAllMarkers(Fb_old, only.pos = TRUE)
+Fb_old.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1)
+
+write.csv(Fb_old.markers, file = "../R_output/Fb_old.markers.csv")
+
+#Heatmap
+Fb_old.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 10) %>%
+    ungroup() -> top10
+DoHeatmap(Fb_old, features = top10$gene) + NoLegend()
+
+#Heatmap - collagen group
+collagen.gene.set <- c("COL1A1", "COL1A2", "COL2A1", "COL3A1", "COL4A1", "COL4A2",
+                       "COL4A3", "COL4A5", "COL4A6", "COL5A1", "COL5A2", "COL5A3",
+                       "COL6A1", "COL6A2", "COL6A3", "COL6A5", "COL6A6", "COL7A1",
+                       "COL8A1", "COL8A2", "COL9A1", "COL9A2", "COL9A3", "COL10A1",
+                       "COL11A1", "COL11A2", "COL12A1", "COL13A1", "COL14A1", "COL15A1",
+                       "COL16A1", "COL17A1", "COL18A1", "COL19A1", "COL21A1", "COL22A1",
+                       "COL23A1", "COL24A1", "COL25A1", "COL27A1", "COL28A1")
+
+DoHeatmap(Fb_old, features = collagen.gene.set) + NoLegend()
+
+#Fibroblast - papillary , reticular
+Papillary_fibroblast <- c("APCDD1", "COMP", "RGS16", "ID1", "HBB", "RGS2", "COL18A1", "DUSP1", "HBA2", "WIF1", "ARRDC3", "NKD2", "DDIT4", "LEPR")
+
+Reticular_fibroblast <- c("WISP2","SLPI","CTHRC1","FBLN1", "IGFBP6","PCSK1N","TSPAN8","MFAP5","DCN","CFD","MMP2","CRYAB","COL1A2","COL1A1","PI16","SERPINF1")
+
+Pro_inflammatory_fibroblast <- c("CXCL3", "CXCL2", "CXCL1", "C11orf96", "SOD2", "CCL2", "TNFAIP6", "GEM", "MEDAG", "IL6", "EIF4A3", "ARID5B", "WTAP", "UAP1", "H2AFZ")
+
+Mesenchymal_fibroblast <- c("COCH", "ASPN", "POSTN", "TNN", "DPEP1", "COL11A1", "SFRP1", "HTRA1", "MRPS6", "GPC3", "SPARCL1", "PPAPDC1B", "C9orf3", "GPM6B", "COL5A2", "FIBIN")
+
+#FeaturePlot
+FeaturePlot (Fb_old, features = Mesenchymal_fibroblast, reduction ="umap")
+
+#naming the sub-clusters
+Fb_old$annot_2nd = "" ;
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(0),]$annot_2nd <- "Pro_inflammatory" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(1),]$annot_2nd <- "Papillary" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(2),]$annot_2nd <- "Mesenchymal" 
+Fb_old@meta.data[Fb_old@meta.data$seurat_clusters %in% c(3),]$annot_2nd <- "Reticular" 
+
+Idents(Fb_old) = "annot_2nd" 
+
+DimPlot(Fb_old, group.by = "annot_2nd", reduction = "umap", label=T)
+
+tiff(filename = paste0('../R_output/','UMAP_Fb_old_cluster_annot.tiff'), res = 150)
+DimPlot(Fb_old, group.by = "annot_2nd", reduction = "umap", label=T)
+dev.off()
+
+save(Fb_old, file = "../R_output/Fb_old.cluster.Rda")
+```
+
+
+```{r topGO analysis - not executed yet}
+
+##GO analysis
+library(ggplot2)
+library(cowplot)
+library(Matrix)
+library(topGO)
+library(limma)
+
+cluster0 <- SubsetData(Fb_old, ident.1 = 1)
+expr <- cluster0@data
+
+
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition)
+n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.75)]
+all.genes <- rownames(expr)
+
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+names(geneList) <- all.genes
+
+# Create topGOdata object
+    GOdata <- new("topGOdata",
+        ontology = "BP", # use biological process ontology
+        allGenes = geneList,
+        geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+```
+
+
+
+```{r GSEA}
+# get data location
+setwd("~/scRNA/GSE151177_psoriasis/rawdata")
+```
+
+
+
+```{r Trajectory / monocle3}
+# get data location
+setwd("~/scRNA/GSE151177_psoriasis/rawdata")
+```
+
+
+
+```{r Cell interaction}
+# get data location
+setwd("~/scRNA/GSE151177_psoriasis/rawdata")
+```
+
+
+```{r Age}
+# get data location
+setwd("~/scRNA/GSE151177_psoriasis/rawdata")
+```
+
+
+```{r Spatial}
+# get data location
+setwd("~/scRNA/GSE151177_psoriasis/rawdata")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
